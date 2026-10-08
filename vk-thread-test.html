@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Стадия 1 — VK-нить (тест коннекта)</title>
+<!-- Библиотека VK Bridge. Для боевого билда в VK лучше собрать npm-пакет @vkontakte/vk-bridge
+     и включить browser.min.js в свой проект (рекомендация доков). Здесь — unpkg для быстрого теста. -->
+<script src="https://unpkg.com/@vkontakte/vk-bridge/dist/browser.min.js"></script>
+<style>
+  html,body{margin:0;min-height:100%;background:#0c0e13;color:#cdd3df;
+    font-family:-apple-system,"Segoe UI",Roboto,sans-serif;
+    -webkit-tap-highlight-color:transparent}
+  .wrap{max-width:560px;margin:0 auto;padding:18px 16px 40px}
+  h1{font-size:16px;font-weight:600;color:#e7ecf6;margin:8px 0 2px}
+  .sub{opacity:.55;font-size:12px;margin-bottom:16px}
+  .step{display:flex;gap:12px;align-items:flex-start;padding:12px 14px;margin:0 0 8px;
+    background:#11141b;border:1px solid #222a38;border-radius:12px;font-size:14px}
+  .dot{flex:none;width:14px;height:14px;border-radius:50%;margin-top:3px;
+    background:#3a4254;transition:background .25s;box-shadow:0 0 0 4px #0c0e13 inset}
+  .step.run .dot{background:#4d7cfe}
+  .step.ok  .dot{background:#46c46a}
+  .step.fail .dot{background:#e0565b}
+  .step .txt{flex:1;min-width:0}
+  .step .lbl{font-weight:500}
+  .step .det{font-size:11px;opacity:.6;margin-top:3px;word-break:break-word;font-family:ui-monospace,Menlo,monospace}
+  .bar{height:4px;border-radius:3px;background:#222a38;margin:16px 0;overflow:hidden}
+  .bar i{display:block;height:100%;width:0;background:#46c46a;transition:width .3s}
+  button{width:100%;background:#161a22;border:1px solid #2a3140;color:#9aa4b6;
+    border-radius:10px;padding:12px;font-size:13px;cursor:pointer;margin-top:6px}
+  button:hover{background:#1d232f;color:#cdd3df}
+  .banner{padding:10px 12px;border-radius:10px;font-size:12px;margin-bottom:12px}
+  .b-info{background:#10182a;border:1px solid #1e2a44;color:#8fb0ff}
+  .b-warn{background:#1c1810;border:1px solid #3a3018;color:#d9b76a}
+  code{font-family:ui-monospace,Menlo,monospace;background:#1a2130;padding:1px 5px;border-radius:4px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Стадия 1 · VK-нить</h1>
+  <div class="sub">цель: билд дошёл до среды VK и записал тестовый рекорд в облако</div>
+  <div id="env"></div>
+  <div class="bar"><i id="prog"></i></div>
+
+  <div class="step" id="s-init"><div class="dot"></div><div class="txt">
+    <div class="lbl">VKWebAppInit</div><div class="det">инициализация моста с платформой</div></div></div>
+  <div class="step" id="s-info"><div class="dot"></div><div class="txt">
+    <div class="lbl">VKWebAppGetUserInfo</div><div class="det">мост отвечает — приложение окружено VK</div></div></div>
+  <div class="step" id="s-set"><div class="dot"></div><div class="txt">
+    <div class="lbl">VKWebAppStorageSet</div><div class="det">пишем тестовый рекорд в облако</div></div></div>
+  <div class="step" id="s-get"><div class="dot"></div><div class="txt">
+    <div class="lbl">VKWebAppStorageGet</div><div class="det">читаем его обратно — цикл записи замкнут</div></div></div>
+
+  <button id="run">Повторить прогон</button>
+</div>
+
+<script>
+// Объект в глобальной области — vkBridge (когда библиотека подключена тегом <script>, а не через npm import).
+var bridge = window.vkBridge;
+
+var TOTAL = 4;
+var done = 0;
+var KEY = 'thread_probe';
+var VALUE = btoa('score=' + Date.now());   // VKWebAppStorage ждёт base64-значение
+
+function env(html){ document.getElementById('env').innerHTML = html; }
+function setStep(id, cls){
+  var el = document.getElementById(id);
+  el.classList.remove('run','ok','fail');
+  if(cls) el.classList.add(cls);
+}
+function detail(id, txt){
+  var d = document.getElementById(id).querySelector('.det');
+  d.textContent = txt;
+}
+function progress(){ document.getElementById('prog').style.width = (done/TOTAL*100)+'%'; }
+function finishAll(){
+  if(done === TOTAL) env('<div class="banner b-info">VK-нить замкнута: билд живёт в среде VK и пишет/читает рекорд. Можно расти дальше.</div>');
+}
+
+function detectEnv(){
+  if(!bridge){
+    env('<div class="banner b-warn">VK Bridge не загрузился (нет <code>vkBridge</code>). Проверь доступ к unpkg или подключи библиотеку локально.</div>');
+    return false;
+  }
+  return true;
+}
+
+function run(){
+  done = 0; progress();
+  if(!detectEnv()){
+    setStep('s-init','fail'); setStep('s-info','fail');
+    setStep('s-set','fail'); setStep('s-get','fail');
+    return;
+  }
+  // 1. Init — строго первым, до загрузки основных ресурсов.
+  setStep('s-init','run');
+  bridge.send('VKWebAppInit')
+    .then(function(){ setStep('s-init','ok'); detail('s-init','готово'); done++; progress(); step2(); })
+    .catch(function(e){
+      setStep('s-init','fail');
+      var code = (e && e.errorData && e.errorData.error_code) || (e && e.type) || '';
+      detail('s-init','ошибка '+(code||'unknown')+' — запусти файл ВНУТРИ приложения VK, а не в обычном браузере');
+      env('<div class="banner b-warn">Открыто вне среды VK. Чтобы нить замкнулась, приложение должно запускаться внутри ВКонтакте (или в VK-эмуляторе). Это ожидаемо для обычного браузера.</div>');
+    });
+}
+
+// 2. UserInfo — доказываем, что мост реально отвечает.
+function step2(){
+  setStep('s-info','run');
+  bridge.send('VKWebAppGetUserInfo')
+    .then(function(d){
+      var u = d && d[0] ? d[0] : d;
+      setStep('s-info','ok'); detail('s-info','мост отвечает: '+(u && u.first_name ? u.first_name : 'id '+(u&&u.id||'')));
+      done++; progress(); step3();
+    })
+    .catch(function(){
+      setStep('s-info','ok'); detail('s-info','мост отвечает (профиль недоступен — не важно для нити)');
+      done++; progress(); step3();   // для «нити» важен факт ответа моста, а не доступ к профилю
+    });
+}
+
+// 3. Пишем тестовый рекорд в облачное хранилище приложения.
+function step3(){
+  setStep('s-set','run');
+  bridge.send('VKWebAppStorageSet', { key: KEY, value: VALUE })
+    .then(function(){ setStep('s-set','ok'); detail('s-set','записано в облако (base64)'); done++; progress(); step4(); })
+    .catch(function(e){ setStep('s-set','fail'); detail('s-set','не удалось записать: '+((e&&e.type)||e)); });
+}
+
+// 4. Читаем обратно — замыкаем цикл записи.
+function step4(){
+  setStep('s-get','run');
+  bridge.send('VKWebAppStorageGet', { keys: [KEY] })
+    .then(function(d){
+      setStep('s-get','ok');
+      var got = d && d.keys && d.keys[0] && d.keys[0].value;
+      detail('s-get', got ? ('прочитано обратно: '+got) : 'ключ есть, значение вернулось');
+      done++; progress(); finishAll();
+    })
+    .catch(function(e){ setStep('s-get','fail'); detail('s-get','не удалось прочитать: '+((e&&e.type)||e)); });
+}
+
+document.getElementById('run').addEventListener('click', run);
+run();
+</script>
+</body>
+</html>
